@@ -1,0 +1,34 @@
+# Build artefacts
+_build/
+dist/
+build/
+*.spec.bak
+_build_*_preview.spec
+*.log
+
+# Model weights are large; download them with scripts/download_models.py.
+# The manifest and the instructions are small metadata and DO belong in git.
+models/*
+!models/README.md
+!models/manifest.json
+!models/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Local app data
+settings.json
+history.sqlite3*
+*.lnk
+recordings/
+exports/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

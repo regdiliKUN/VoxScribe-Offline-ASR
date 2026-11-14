@@ -1,0 +1,340 @@
+[
+  {
+    "id": "zh_01_daily",
+    "text": "今天天气很好，我们一起去公园散步吧。",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_01_daily.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_02_office",
+    "text": "请帮我把这份会议纪要整理成一份正式文件。",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_02_office.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_03_tech",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "zh-CN-YunyangNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_03_tech.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_04_number",
+    "text": "这个季度公司的营业收入增长了百分之十五。",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_04_number.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_05_phone",
+    "text": "喂，你好，我想预约明天下午三点的牙科门诊。",
+    "voice": "zh-CN-YunxiNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_05_phone.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_06_asr",
+    "text": "语音识别的准确率取决于模型质量和录音环境。",
+    "voice": "zh-CN-YunyangNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_06_asr.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_07_travel",
+    "text": "请问从北京南站到上海虹桥站的高铁几点发车？",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_07_travel.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_08_deadline",
+    "text": "我们需要在周五之前完成项目验收并提交报告。",
+    "voice": "zh-CN-YunxiNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_08_deadline.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_09_terms",
+    "text": "机器学习、深度学习以及自然语言处理是三个相关领域。",
+    "voice": "zh-CN-YunyangNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_09_terms.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_10_literary",
+    "text": "窗外下着小雨，屋里的灯光显得格外温暖。",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_10_literary.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_11_volume",
+    "text": "请把音量调大一点，我听不清楚你说什么。",
+    "voice": "zh-CN-YunxiNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_11_volume.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_12_date",
+    "text": "二零二六年十一月十五日，实验室完成了第一次系统测试。",
+    "voice": "zh-CN-YunyangNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_12_date.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_13_product",
+    "text": "欢迎使用本地离线语音转文字工具，所有数据都不会上传到云端。",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_13_product.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_14_contract",
+    "text": "这份合同包含保密条款、付款方式和争议解决机制。",
+    "voice": "zh-CN-YunxiNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_14_contract.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_15_mixed",
+    "text": "这个新功能需要下个迭代周期上线，记得同步给项目经理。",
+    "voice": "zh-CN-YunyangNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/zh_15_mixed.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_16_fast",
+    "text": "北京、上海、广州、深圳是中国四个重要的经济中心城市。",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+25%",
+    "wav": "eval/wav/zh_16_fast.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "zh_17_slow",
+    "text": "请您在听到提示音之后，清楚地说出您的姓名和身份证号码。",
+    "voice": "zh-CN-YunxiNeural",
+    "rate": "-20%",
+    "wav": "eval/wav/zh_17_slow.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "en_01",
+    "text": "The quick brown fox jumps over the lazy dog.",
+    "voice": "en-US-AriaNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/en_01.wav",
+    "lang": "en"
+  },
+  {
+    "id": "en_02",
+    "text": "Please schedule a meeting with the engineering team for next Monday morning.",
+    "voice": "en-US-GuyNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/en_02.wav",
+    "lang": "en"
+  },
+  {
+    "id": "en_03",
+    "text": "Offline speech recognition protects your privacy by keeping audio on this device.",
+    "voice": "en-US-AriaNeural",
+    "rate": "+0%",
+    "wav": "eval/wav/en_03.wav",
+    "lang": "en"
+  },
+  {
+    "id": "sapi_01",
+    "text": "本地语音合成可以生成完全离线的测试样本。",
+    "voice": "SAPI-Huihui",
+    "rate": "0%",
+    "wav": "eval/wav/sapi_01.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "sapi_02",
+    "text": "请把这份报告发送给财务部门的同事。",
+    "voice": "SAPI-Huihui",
+    "rate": "0%",
+    "wav": "eval/wav/sapi_02.wav",
+    "lang": "zh"
+  },
+  {
+    "id": "robust_noise_snr20",
+    "text": "今天天气很好，我们一起去公园散步吧。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/robust_noise_snr20.wav",
+    "lang": "zh",
+    "variant": "noise_snr20"
+  },
+  {
+    "id": "robust_noise_snr10",
+    "text": "今天天气很好，我们一起去公园散步吧。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/robust_noise_snr10.wav",
+    "lang": "zh",
+    "variant": "noise_snr10"
+  },
+  {
+    "id": "robust_quiet",
+    "text": "今天天气很好，我们一起去公园散步吧。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/robust_quiet.wav",
+    "lang": "zh",
+    "variant": "quiet"
+  },
+  {
+    "id": "robust_clipped",
+    "text": "今天天气很好，我们一起去公园散步吧。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/robust_clipped.wav",
+    "lang": "zh",
+    "variant": "clipped"
+  },
+  {
+    "id": "long_60s",
+    "text": "今天天气很好，我们一起去公园散步吧。请帮我把这份会议纪要整理成一份正式文件。人工智能技术正在深刻改变我们的工作方式。这个季度公司的营业收入增长了百分之十五。喂，你好，我想预约明天下午三点的牙科门诊。今天天气很好，我们一起去公园散步吧。请帮我把这份会议纪要整理成一份正式文件。人工智能技术正在深刻改变我们的工作方式。这个季度公司的营业收入增长了百分之十五。喂，你好，我想预约明天下午三点的牙科门诊。今天天气很好，我们一起去公园散步吧。请帮我把这份会议纪要整理成一份正式文件。人工智能技术正在深刻改变我们的工作方式。这个季度公司的营业收入增长了百分之十五。喂，你好，我想预约明天下午三点的牙科门诊。今天天气很好，我们一起去公园散步吧。请帮我把这份会议纪要整理成一份正式文件。人工智能技术正在深刻改变我们的工作方式。这个季度公司的营业收入增长了百分之十五。喂，你好，我想预约明天下午三点的牙科门诊。今天天气很好，我们一起去公园散步吧。请帮我把这份会议纪要整理成一份正式文件。人工智能技术正在深刻改变我们的工作方式。这个季度公司的营业收入增长了百分之十五。喂，你好，我想预约明天下午三点的牙科门诊。今天天气很好，我们一起去公园散步吧。请帮我把这份会议纪要整理成一份正式文件。人工智能技术正在深刻改变我们的工作方式。这个季度公司的营业收入增长了百分之十五。喂，你好，我想预约明天下午三点的牙科门诊。",
+    "voice": "concat",
+    "rate": "+0%",
+    "wav": "eval/wav/long_60s.wav",
+    "lang": "zh",
+    "variant": "long"
+  },
+  {
+    "id": "hard_noise_snr5",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_noise_snr5.wav",
+    "lang": "zh",
+    "variant": "noise_snr5"
+  },
+  {
+    "id": "hard_noise_snr0",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_noise_snr0.wav",
+    "lang": "zh",
+    "variant": "noise_snr0"
+  },
+  {
+    "id": "hard_noise_snr-5",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_noise_snr-5.wav",
+    "lang": "zh",
+    "variant": "noise_snr-5"
+  },
+  {
+    "id": "hard_modnoise",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_modnoise.wav",
+    "lang": "zh",
+    "variant": "modulated_noise"
+  },
+  {
+    "id": "hard_telephone8k",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_telephone8k.wav",
+    "lang": "zh",
+    "variant": "telephone_8k"
+  },
+  {
+    "id": "hard_mp3_16k",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_mp3_16k.wav",
+    "lang": "zh",
+    "variant": "mp3_16kbps"
+  },
+  {
+    "id": "hard_reverb",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_reverb.wav",
+    "lang": "zh",
+    "variant": "reverb"
+  },
+  {
+    "id": "hard_tempo130",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_tempo130.wav",
+    "lang": "zh",
+    "variant": "tempo_1.3"
+  },
+  {
+    "id": "hard_babble",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_babble.wav",
+    "lang": "zh",
+    "variant": "overlapping_speech"
+  },
+  {
+    "id": "hard_dc_clip",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_dc_clip.wav",
+    "lang": "zh",
+    "variant": "dc_clipping"
+  },
+  {
+    "id": "hard_stereo441",
+    "text": "人工智能技术正在深刻改变我们的工作方式。",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_stereo441.wav",
+    "lang": "zh",
+    "variant": "stereo_44.1k"
+  },
+  {
+    "id": "hard_silence",
+    "text": "",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_silence.wav",
+    "lang": "zh",
+    "variant": "silence"
+  },
+  {
+    "id": "hard_tiny",
+    "text": "",
+    "voice": "derived",
+    "rate": "+0%",
+    "wav": "eval/wav/hard_tiny.wav",
+    "lang": "zh",
+    "variant": "0.1s"
+  }
+]
