@@ -278,7 +278,11 @@
     `frozen=true` / `model_integrity=ok` 与三引擎可用；SHA-256 已固定并写入
     `docs/TEST_REPORT.md`。
   - 逐轮编号与每轮四要素复查完毕，1–20 轮无跳号、无凑数轮；
-    README 相对链接目标全部存在。
+    7 份 Markdown 文档共 0 条断链。
+  - 交付验证：GitHub 仓库 62 个文件已推送；`v1.0.0` Release 三个资产
+    （EXE / ZIP / `SHA256SUMS.txt`）全部 `state=uploaded`，服务端 SHA-256
+    与本地逐字节一致；实测从 Release 下载 `SHA256SUMS.txt` 与本地 `diff` 无差异，
+    下载链路可用。
 
 <!-- ITERATION_END -->
 
