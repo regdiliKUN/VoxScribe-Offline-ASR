@@ -13,9 +13,9 @@
 
 | 版本 | 下载链接 | 说明 |
 |---|---|---|
-| **单文件 EXE（推荐入门）** | [VoxScribe-Standalone.exe](https://github.com/regdiliKUN/VoxScribe-Offline-ASR/releases/download/v1.0.0/VoxScribe-Standalone.exe) | 真正的单个 EXE，双击即用；内置 SenseVoice + Paraformer 双引擎、VAD、ffmpeg |
-| **完整便携版（推荐精度）** | [VoxScribe-Portable-win64.zip](https://github.com/regdiliKUN/VoxScribe-Offline-ASR/releases/download/v1.0.0/VoxScribe-Portable-win64.zip) | 解压后双击 `VoxScribe.exe`；额外包含 **Qwen3-ASR 0.6B 极致精度引擎** |
-| 校验和 | [SHA256SUMS.txt](https://github.com/regdiliKUN/VoxScribe-Offline-ASR/releases/download/v1.0.0/SHA256SUMS.txt) | 两个发行包的 SHA-256，下载后可核对完整性 |
+| **单文件 EXE（推荐入门）** | [VoxScribe-Standalone.exe](https://github.com/regdiliKUN/VoxScribe-Offline-ASR/releases/download/v1.0.1/VoxScribe-Standalone.exe) | 真正的单个 EXE，双击即用；内置 SenseVoice + Paraformer 双引擎、VAD、ffmpeg |
+| **完整便携版（推荐精度）** | [VoxScribe-Portable-win64.zip](https://github.com/regdiliKUN/VoxScribe-Offline-ASR/releases/download/v1.0.1/VoxScribe-Portable-win64.zip) | 解压后双击 `VoxScribe.exe`；额外包含 **Qwen3-ASR 0.6B 极致精度引擎** |
+| 校验和 | [SHA256SUMS.txt](https://github.com/regdiliKUN/VoxScribe-Offline-ASR/releases/download/v1.0.1/SHA256SUMS.txt) | 两个发行包的 SHA-256，下载后可核对完整性 |
 | 全部版本 | [Releases 页面](https://github.com/regdiliKUN/VoxScribe-Offline-ASR/releases/latest) | 历史版本、源码压缩包 |
 
 > 两个版本都是**免安装绿色软件**：不需要 Python、不需要 VC++ 运行库安装、不需要管理员权限。

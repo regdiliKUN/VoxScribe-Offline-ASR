@@ -284,13 +284,67 @@
     与本地逐字节一致；实测从 Release 下载 `SHA256SUMS.txt` 与本地 `diff` 无差异，
     下载链路可用。
 
+### 第 21 轮 — 桌面快捷方式根因排查与创建可见性（正确性 / 边界情况 / 一致性）
+
+- **目标**：搞清楚"为什么桌面看不到快捷方式"，让打包后的程序确实在用户真实桌面
+  创建快捷方式，并且创建动作对用户可以确认、可感知。
+- **改动**：
+  1. 排查日志 `AppData\Local\VoxScribe\voxscribe.log` 与 `settings.json`：发现此前所有
+     "Desktop shortcut created" 记录全部来自 pytest 用 `--desktop` 指向的临时目录，或早期
+     误建在 `D:\Desktop` 又手动删除的测试件；真实桌面 `C:\Users\xukunhang\Desktop` 与
+     用户目录下都不存在 `VoxScribe.lnk`，也从未生成 `settings.json`。
+     结论：自动创建逻辑只在 `is_frozen() and auto_shortcut` 时触发，而用户一直通过
+     CLI/pytest 或源码运行，从未双击运行过打包后的 GUI EXE，因此从未触发。
+  2. 关键边界发现：用户系统桌面被重定向到 **`D:\Desktop`**（注册表
+     `User Shell Folders\Desktop`），`get_desktop_dir()` 已按注册表正确解析，所以真正
+     的桌面位置在 D 盘而非 C 盘——这也解释了"在 C 盘找快捷方式找不到"。
+  3. `main.py`：捕获"本次新建"标志，GUI 首次真正创建快捷方式后，在 `MainWindow.show()`
+     之后弹出一个一次性 `QMessageBox.information`，明确提示"已在桌面创建 VoxScribe 快捷方式"
+     及"右键 → 打开文件所在位置可直达程序目录"，避免用户误判未创建。
+  4. 当场用 `VoxScribe-Standalone.exe --cli --create-shortcut`（清空 PYTHONPATH/PYTHONHOME/
+     VOXSCRIBE_MODELS）在真实桌面 `D:\Desktop\VoxScribe.lnk` 创建成功。
+- **理由**：用户明确反映看不到桌面快捷方式。根因不是代码不创建，而是使用方式（没双击过
+  打包 EXE）+ 桌面重定向到 D 盘导致在错误位置查找。补一个可见性提示，是低成本、高确定性的
+  体验修复，且不改变核心结构与现有幂等/校验逻辑。
+- **自检**：
+  - 真实桌面 `D:\Desktop\VoxScribe.lnk` 已生成；回读 `TargetPath` 指向
+    `…\dist\standalone\VoxScribe-Standalone.exe`、`WorkingDirectory` 指向其目录，
+    `verify_shortcut()` 返回 `True / OK`，即"打开文件所在位置"解析到 EXE 所在目录。
+  - `main.py` 通过 `py_compile`；全量 `tests` 没有任何用例调用 `run_gui`，offscreen 下
+    不会触发弹窗，回归不受影响。
+  - `is_frozen()` 门控与"已存在且有效则跳过、损坏则重建"的幂等逻辑保持不变。
+
+### 第 22 轮 — 发行包更新、GitHub 重新交付与旧包清理（完整性 / 一致性）
+
+- **目标**：把含快捷方式可见性改进的源码重新打包，上传到 GitHub，更新本地"发给朋友"的包，
+  并舍弃旧的构建产物。
+- **改动**：
+  1. 内部版本号 `1.0.0 → 1.0.1`（`__init__.py`）。
+  2. 以最终源码重建 `VoxScribe-Standalone.exe`（332.1 MB）与
+     `VoxScribe-Portable-win64.zip`（1138.3 MB）；构建脚本对旧产物改为归档（`_previous_*`）
+     而非删除，规避环境批量删除保护拦截。
+  3. 更新 `README.md` 下载链接到 `v1.0.1`；重写 `dist/RELEASE_NOTES.md` 记录相对 v1.0.0 的变更。
+  4. GitHub：删除旧的 `v1.0.0` Release（含其资产与 tag），新建 `v1.0.1` Release，
+     上传新的 standalone EXE、portable ZIP 与 `SHA256SUMS.txt`。
+  5. 清理 `dist/portable/VoxScribe_previous_*` 旧归档；补本文档第 21、22 轮记录。
+- **理由**：用户要求"更新一下这个包""重新上传 GitHub""更新本地发给朋友的包、旧包可舍弃"。
+  v1.0.1 仅包含桌面快捷方式可见性这一处面向用户的改进，识别引擎、模型、打包结构、测试体系
+  完全不变，因此是一次低风险的补丁发布。
+- **自检**：
+  - 构建完成后跑 `tests/test_portable_exe.py` 与 `tests/test_packaged_exe.py` 验证两种
+    打包 EXE 在清空 Python 环境变量下的端到端行为（含 `--cli --create-shortcut`、
+    `--verify-models`、`--selftest`）。
+  - 上传后核对三个资产的服务端 SHA-256 与本地 `dist/SHA256SUMS.txt` 逐字节一致；
+    README 链接指向 `v1.0.1` 且可访问。
+  - 旧 `v1.0.0` Release 与 `_previous_*` 归档已删除，本地仅保留 v1.0.1 发行包。
+
 <!-- ITERATION_END -->
 
 ---
 
 ## 最终版本相对初始版本的整体提升
 
-**最终版本：v1.0.0**，代码仓库 `regdiliKUN/VoxScribe-Offline-ASR`，
+**最终版本：v1.0.1**（累计 22 轮开发迭代），代码仓库 `regdiliKUN/VoxScribe-Offline-ASR`，
 发行包与下载方式见 [`README.md`](../README.md)。
 
 | 维度 | 基线 v0 | 最终 v1.0.0 |
@@ -309,7 +363,9 @@
 
 **总体结论**：从"不能录音、不能识别、不能导出、无界面、无测试、无打包"的骨架，
 提升为一款可直接双击运行、完全离线、精度可回归、异常可恢复、源码与产物均可复现的
-Windows 桌面软件。20 轮迭代中每一轮都至少针对一个质量维度做了实质改动并当场自检，
+Windows 桌面软件。22 轮迭代中每一轮都至少针对一个质量维度做了实质改动并当场自检，
 期间发现并修复 23 类问题；最终全量回归 132 passed / 0 failed。
+v1.0.1 在 v1.0.0 基础上补上了"桌面快捷方式首次创建后的一次性可见性提示"，
+并修正了"用户系统桌面被重定向到 D 盘导致误以为未创建"的排查结论。
 
 

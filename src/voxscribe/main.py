@@ -159,11 +159,13 @@ def run_gui(args) -> int:
     cfg_store = get_store()
     cfg = cfg_store.data
 
+    created_shortcut_now = False
     if not args.no_gui_shortcut and cfg.auto_shortcut and is_frozen():
         if cfg.shortcut_check_each_start or not cfg.shortcut_created:
             try:
                 r = create_shortcut()
                 if r.created:
+                    created_shortcut_now = True
                     log.info("Desktop shortcut ready: %s", r.path)
                 cfg_store.update(shortcut_created=True)
             except Exception as exc:
@@ -174,6 +176,12 @@ def run_gui(args) -> int:
     app.setApplicationVersion(__version__)
     win = MainWindow()
     win.show()
+    if created_shortcut_now:
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(
+            win, "桌面快捷方式已创建",
+            "已在你的桌面创建 VoxScribe 快捷方式，以后可直接从桌面启动。\n\n"
+            "右键该快捷方式 → 选择「打开文件所在位置」可直达程序所在目录。")
     cfg_store.update(first_run_done=True)
     return app.exec()
 
