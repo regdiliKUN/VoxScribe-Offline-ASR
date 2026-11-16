@@ -56,6 +56,17 @@ def _json(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2)
 
 
+def _report_gui_error(code: str, message: str, detail: str = "") -> None:
+    """GUI has no stdout: never dump JSON to a hidden console."""
+    log.error("%s | %s | %s", code, message, detail)
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        if QApplication.instance() is not None:
+            QMessageBox.critical(None, "VoxScribe", message)
+    except Exception:  # no QApplication yet / headless test
+        pass
+
+
 def selftest(full_hash: bool = False) -> int:
     from .core import shortcut
     from .core.integrity import verify_full, verify_quick
@@ -75,8 +86,13 @@ def selftest(full_hash: bool = False) -> int:
         "desktop": str(shortcut.get_desktop_dir()),
         "log_file": str(log_file()),
         "engines": {
-            s.key: {"available": not s.missing_files(),
-                    "missing": s.missing_files()}
+            s.key: {
+                # Keep this consistent with available_engines(): a truncated
+                # model is not "available" even when every file exists.
+                "available": not s.missing_files() and not s.integrity_issues(),
+                "missing": s.missing_files(),
+                "integrity_issues": s.integrity_issues(),
+            }
             for s in SPECS
         },
         "available_engines": mgr.available_keys(),
@@ -105,6 +121,12 @@ def do_transcribe(args) -> int:
     from .core.config import get_store
     from .engines.manager import EngineManager
 
+    from .core.config import VALID_ENGINES
+    if args.engine not in VALID_ENGINES:
+        print(_json({"ok": False, "code": "VOX_ENGINE",
+                     "message": f"未知引擎：{args.engine}",
+                     "valid_engines": list(VALID_ENGINES)}))
+        return 2
     if not args.input:
         print(_json({"ok": False, "message": "缺少 --input"}))
         return 2
@@ -123,22 +145,55 @@ def do_transcribe(args) -> int:
 
     result = pipeline.transcribe_file(src)
     out_path = None
+    export_error = None
     if args.out:
-        out_path = export.export_result(
-            result, args.out, fmt=args.format,
-            encoding=args.encoding or cfg.export_encoding,
-            include_timestamps=args.timestamps or cfg.include_timestamps,
-        )
-    print(_json({
+        try:
+            out_path = export.export_result(
+                result, args.out, fmt=args.format,
+                encoding=args.encoding or cfg.export_encoding,
+                include_timestamps=args.timestamps or cfg.include_timestamps,
+            )
+        except Exception as exc:
+            # Recognition already succeeded and may have taken minutes. Never
+            # throw that text away just because the export path was bad: keep
+            # it in the response so callers can persist it themselves.
+            export_error = f"{type(exc).__name__}: {exc}"
+            log.error("Export failed after successful transcription: %s", export_error)
+    response = {
         "ok": True, "text": result.text, "engine": result.engine,
         "duration": result.duration, "segments": len(result.segments),
-        "warnings": result.warnings,
+        "elapsed": result.elapsed, "rtf": result.rtf,
+        "warnings": list(result.warnings),
         "output": str(out_path) if out_path else None,
-    }))
+    }
+    # A run where every segment died is not a successful transcription.
+    # Scripts previously saw ok=true / exit 0 and could not detect the failure.
+    if result.failed_segments and result.is_empty:
+        response["ok"] = False
+        response["code"] = "VOX_ENGINE"
+        response["message"] = "所有识别引擎均失败，未生成文字。"
+        print(_json(response))
+        return 2
+    if export_error:
+        response["ok"] = False
+        response["code"] = "VOX_EXPORT"
+        response["export_error"] = export_error
+        print(_json(response))
+        return 2
+    print(_json(response))
     return 0
 
 
 def run_cli(args) -> int:
+    # An if-chain used to silently ignore the lower-priority action; in batch
+    # scripts that means the requested work was never performed.
+    actions = [bool(args.selftest), bool(args.verify_models),
+               bool(args.create_shortcut), bool(args.input or args.out)]
+    if sum(actions) > 1:
+        print(_json({"ok": False, "code": "VOX_ARGS",
+                     "message": "一次只能执行一个动作（自检 / 校验模型 / 创建快捷方式 / 转写）",
+                     "requested_actions": sum(actions)}))
+        return 2
     if args.selftest or args.verify_models:
         return selftest(full_hash=args.verify_models)
     if args.create_shortcut:
@@ -223,16 +278,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return run_cli(args) if args.cli else run_gui(args)
     except VoxScribeError as exc:
-        log.error("%s | %s", exc.code, exc.detail)
-        print(_json({"ok": False, "code": exc.code,
-                     "message": str(exc), "detail": exc.detail}))
+        if args.cli:
+            print(_json({"ok": False, "code": exc.code,
+                         "message": str(exc), "detail": exc.detail}))
+        else:
+            _report_gui_error(exc.code, str(exc), exc.detail)
         return 2
     except KeyboardInterrupt:
         return 130
     except Exception as exc:
         logging.getLogger("voxscribe.main").exception("Fatal error: %s", exc)
-        print(_json({"ok": False, "code": "VOX_FATAL",
-                     "message": str(exc)}))
+        if args.cli:
+            print(_json({"ok": False, "code": "VOX_FATAL",
+                         "message": str(exc)}))
+        else:
+            _report_gui_error("VOX_FATAL", str(exc))
         return 1
 
 

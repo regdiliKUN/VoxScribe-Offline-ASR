@@ -100,7 +100,7 @@ VoxScribe/
 │   ├── download_models.py       # 从官方 release 重建模型包（断点续传）
 │   └── build.py                 # PyInstaller 单文件 / 便携版构建
 ├── tests/                       # 自动化测试（详见 docs/TEST_REPORT.md）
-├── docs/{RESEARCH,ARCHITECTURE,ITERATIONS,TEST_REPORT}.md
+├── docs/{RESEARCH,ARCHITECTURE,ITERATIONS,ITERATION_REPORT_23_42,ITERATION_REPORT_43_62,ITERATION_REPORT_63_82,TEST_REPORT}.md
 ├── models/                      # manifest.json + 说明入库；权重由脚本下载
 ├── README.md / LICENSE / NOTICE.md / requirements.txt
 ```
@@ -152,5 +152,8 @@ python -m venv .venv
 QwenLM/Qwen3-ASR、Silero VAD、Qt、FFmpeg 等开源社区。
 
 **迭代记录**：[`docs/ITERATIONS.md`](docs/ITERATIONS.md) ·
+**质量迭代报告（第 23–42 轮）**：[`docs/ITERATION_REPORT_23_42.md`](docs/ITERATION_REPORT_23_42.md) ·
+**深度迭代报告（第 43–62 轮）**：[`docs/ITERATION_REPORT_43_62.md`](docs/ITERATION_REPORT_43_62.md) ·
+**第三批迭代报告（第 63–82 轮）**：[`docs/ITERATION_REPORT_63_82.md`](docs/ITERATION_REPORT_63_82.md) ·
 **测试报告**：[`docs/TEST_REPORT.md`](docs/TEST_REPORT.md) ·
 **技术调研**：[`docs/RESEARCH.md`](docs/RESEARCH.md)

@@ -19,11 +19,30 @@ def setup_logging(level: str = "INFO", console: bool = True) -> Path:
     path = log_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     root = logging.getLogger()
+    resolved = getattr(logging, level.upper(), logging.INFO)
     if _CONFIGURED:
-        root.setLevel(getattr(logging, level.upper(), logging.INFO))
+        root.setLevel(resolved)
+        # Keep already-installed console handlers in sync: otherwise raising
+        # the level to DEBUG lets records through root but the console handler
+        # still drops them at WARNING, so the setting appears to do nothing.
+        for h in root.handlers:
+            if isinstance(h, logging.StreamHandler) and not isinstance(
+                    h, logging.handlers.RotatingFileHandler):
+                h.setLevel(resolved)
+        # A first call with console=False followed by console=True must be
+        # able to add the handler later; previously it was a no-op forever.
+        if console and not any(
+                isinstance(h, logging.StreamHandler) and not isinstance(
+                    h, logging.handlers.RotatingFileHandler)
+                for h in root.handlers):
+            stream = logging.StreamHandler(sys.stderr)
+            stream.setFormatter(logging.Formatter(
+                _FMT, datefmt="%Y-%m-%d %H:%M:%S"))
+            stream.setLevel(resolved)
+            root.addHandler(stream)
         return path
 
-    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    root.setLevel(resolved)
     formatter = logging.Formatter(_FMT, datefmt="%Y-%m-%d %H:%M:%S")
 
     file_handler = logging.handlers.RotatingFileHandler(

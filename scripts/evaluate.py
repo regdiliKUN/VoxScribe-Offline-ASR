@@ -71,28 +71,48 @@ def evaluate(engine: str = "auto", ids: set[str] | None = None) -> dict:
         # Fixtures are flattened into tests/fixtures/ in the repository.
         wav = FIXTURES / Path(item["wav"]).name
         if not wav.is_file():
+            # Silently skipping made a 40-item suite report only 8 samples
+            # and could even improve the advertised CER.  Count it as a
+            # full miss so the result cannot look better than it is.
+            rows.append({
+                "id": item["id"], "ref": item["text"],
+                "hyp": "<MISSING AUDIO>", "cer": 1.0, "engine": "none",
+                "failed": True, "missing_audio": True,
+                "duration": 0.0, "secs": 0.0,
+            })
             continue
         a = audio.load_audio(wav)
         t0 = time.perf_counter()
+        failed = False
         try:
             text, used, _ = mgr.transcribe(a.samples, engine,
                                            sample_rate=a.sample_rate,
                                            allow_fallback=True)
         except Exception as exc:
-            text, used = f"<ERROR {exc}>", "none"
+            text, used, failed = f"<ERROR {exc}>", "none", True
         secs = time.perf_counter() - t0
+        # A transcription error must score as a full miss (CER 1.0).  Scoring
+        # the literal "<ERROR ...>" string by string similarity would give a
+        # failed sample a deceptively low CER and contaminate the aggregate.
+        score = 1.0 if failed else cer(item["text"], text)
         rows.append({
             "id": item["id"], "ref": item["text"], "hyp": text,
-            "cer": round(cer(item["text"], text), 4), "engine": used,
+            "cer": round(score, 4), "engine": used, "failed": failed,
             "duration": round(a.duration, 2), "secs": round(secs, 3),
         })
     scored = [r for r in rows if normalize(r["ref"])]
+    successful = [r for r in rows if not r["failed"]]
+    # Failures may return almost instantly; counting their (tiny) elapsed
+    # time and duration produced a flattering near-zero RTF.
+    rtf = (sum(r["secs"] for r in successful) /
+           max(0.001, sum(r["duration"] for r in successful)))
     return {
         "engine": engine,
         "samples": len(rows),
         "cer": round(sum(r["cer"] for r in scored) / max(1, len(scored)), 4),
-        "rtf": round(sum(r["secs"] for r in rows) /
-                     max(0.001, sum(r["duration"] for r in rows)), 4),
+        "rtf": round(rtf, 4),
+        "failed_samples": len(rows) - len(successful),
+        "missing_samples": sum(1 for r in rows if r.get("missing_audio")),
         "rows": rows,
     }
 
@@ -105,7 +125,8 @@ def main() -> int:
     args = ap.parse_args()
     result = evaluate(args.engine, set(args.ids) if args.ids else None)
     print(f"engine={result['engine']}  samples={result['samples']}  "
-          f"CER={result['cer']:.4f}  RTF={result['rtf']:.4f}")
+          f"CER={result['cer']:.4f}  RTF={result['rtf']:.4f}  "
+          f"failed={result['failed_samples']}  missing={result['missing_samples']}")
     for r in result["rows"]:
         print(f"  {r['id']:<22} cer={r['cer']:.3f}  {r['engine']:<12} {r['hyp'][:48]}")
     if args.out:

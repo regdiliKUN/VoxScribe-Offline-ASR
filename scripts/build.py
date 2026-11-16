@@ -272,7 +272,10 @@ def main() -> int:
     ap.add_argument("--mode", choices=("standalone", "portable", "all"), default="all")
     args = ap.parse_args()
     if not (MODELS / "manifest.json").is_file():
-        print("WARNING: models/manifest.json missing; run scripts/download_models.py first")
+        # Continuing here only delayed the failure to spec_source()'s
+        # read_text(), after the user had already waited through a build.
+        raise SystemExit(
+            "缺少 models/manifest.json：请先运行 scripts/download_models.py 下载模型")
     if args.mode in ("standalone", "all"):
         build_standalone()
     if args.mode in ("portable", "all"):

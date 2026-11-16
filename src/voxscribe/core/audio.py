@@ -77,9 +77,23 @@ class AudioSegment:
 
 
 def resample(x: np.ndarray, src_sr: int, dst_sr: int = TARGET_SR) -> np.ndarray:
-    """Linear resampling; avoids a SciPy dependency in the frozen build."""
+    """Linear resampling with anti-aliasing on decimation; no SciPy needed.
+
+    Plain linear interpolation when down-sampling folds frequencies above the
+    new Nyquist limit back into the speech band (e.g. 44.1 kHz -> 16 kHz folds
+    20 kHz to ~2.4 kHz).  A short moving-average FIR applied before decimation
+    suppresses that aliasing while keeping the frozen build dependency-free.
+    """
     if src_sr == dst_sr or x.size == 0:
         return np.ascontiguousarray(x, dtype="float32")
+    x = np.asarray(x, dtype="float32")
+    if src_sr > dst_sr:
+        # Kernel width ~= decimation factor gives a low-pass corner near the
+        # destination Nyquist frequency.
+        width = max(2, int(round(src_sr / dst_sr)))
+        if x.size >= width:
+            kernel = np.ones(width, dtype="float32") / width
+            x = np.convolve(x, kernel, mode="same")
     n = max(1, int(round(len(x) * dst_sr / src_sr)))
     return np.ascontiguousarray(
         np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x),
@@ -101,12 +115,17 @@ def normalize(x: np.ndarray, sr: int) -> np.ndarray:
         log.warning("Non-finite samples repaired")
     if sr != TARGET_SR:
         x = resample(x, sr, TARGET_SR)
-    # Guard against int16-scale input read as float by custom readers.
+    # Scale only by what the data actually needs.  The old `peak > 8` rule
+    # mistook legitimately hot float audio (e.g. peak 10) for int16 samples
+    # read as float, dividing it by 32768 and turning speech into silence.
     peak = float(np.max(np.abs(x)))
-    if peak > 8.0:
+    if peak > 32768.0:
+        # Clearly int16-scale values supplied through a float reader.
         x = x / 32768.0
-        peak = float(np.max(np.abs(x)))
-    if peak > 1.0:
+    elif peak > 1.0:
+        # Ordinary over-driven float audio: peak-normalise, never silence it.
+        x = x / peak
+    if float(np.max(np.abs(x))) > 1.0:
         x = np.clip(x, -1.0, 1.0)
     return np.ascontiguousarray(x, dtype="float32")
 
@@ -165,10 +184,19 @@ def load_audio(path: str | Path, *, allow_convert: bool = True) -> AudioData:
     import soundfile as sf
 
     p = Path(path)
-    if not p.is_file():
-        raise AudioError("找不到音频文件", detail=str(p))
-    if p.stat().st_size == 0:
-        raise AudioError("音频文件为空（0 字节）")
+    # A file can vanish or lose read permission between is_file() and stat()
+    # (TOCTOU); keep every audio-path failure typed so the UI never surfaces a
+    # raw traceback instead of a friendly message.
+    try:
+        if not p.is_file():
+            raise AudioError("找不到音频文件", detail=str(p))
+        if p.stat().st_size == 0:
+            raise AudioError("音频文件为空（0 字节）")
+    except AudioError:
+        raise
+    except OSError as exc:
+        raise AudioError("无法访问音频文件（可能被移动或无读取权限）",
+                         detail=f"{type(exc).__name__}: {exc}", cause=exc) from exc
     suffix = p.suffix.lower()
 
     temp_wav: Path | None = None
@@ -266,6 +294,11 @@ class Recorder:
         self.on_level = on_level
         self.on_error = on_error
         self._chunks: list[np.ndarray] = []
+        # O(1) running total of appended samples.  Recomputing with
+        # ``sum(len(c) for c in self._chunks)`` on every audio callback turns a
+        # 2-hour recording (~110k blocks) into O(n^2) work inside the PortAudio
+        # thread, which can starve the callback and drop frames.
+        self._total_samples: int = 0
         self._lock = threading.Lock()
         self._stream = None
         self._started_at = 0.0
@@ -285,7 +318,7 @@ class Recorder:
 
     def _file_duration(self) -> float:
         with self._lock:
-            n = sum(len(c) for c in self._chunks)
+            n = self._total_samples
         return n / self.sample_rate
 
     @property
@@ -315,7 +348,8 @@ class Recorder:
         x = np.ascontiguousarray(x, dtype="float32")
         with self._lock:
             self._chunks.append(x.copy())
-            total = sum(len(c) for c in self._chunks)
+            self._total_samples += len(x)
+            total = self._total_samples
         rms = float(np.sqrt(np.mean(x ** 2))) if x.size else 0.0
         self._level = min(1.0, rms * 4.0)
         if self.on_level:
@@ -336,6 +370,7 @@ class Recorder:
             raise RecordingError("已经在录音中")
         import sounddevice as sd
         self._chunks = []
+        self._total_samples = 0
         self._error = None
         self._level = 0.0
         self._limit_reached = False
@@ -376,6 +411,7 @@ class Recorder:
         with self._lock:
             x = np.concatenate(self._chunks) if self._chunks else np.zeros(0, dtype="float32")
             self._chunks = []
+            self._total_samples = 0
         if x.size == 0:
             raise RecordingError("录音为空，请确认麦克风有输入")
         if self._limit_reached:
@@ -396,6 +432,7 @@ class Recorder:
             pass
         with self._lock:
             self._chunks = []
+            self._total_samples = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -456,13 +493,24 @@ def energy_vad_segments(x: np.ndarray, *, frame_ms: int = 20,
     return segments
 
 
-def silero_vad_segments(x: np.ndarray, threshold: float = 0.5,
-                        max_speech_duration: float = 20.0) -> list[tuple[int, int]] | None:
-    """Neural VAD via the bundled silero_vad.onnx. Returns None if unavailable."""
-    model = find_model_file("vad/silero_vad.onnx")
-    if model is None:
-        return None
-    try:
+_SILERO_CACHE: dict[tuple[float, float], object] = {}
+_SILERO_LOCK = threading.Lock()
+
+
+def _get_silero_vad(threshold: float, max_speech_duration: float):
+    """Create (once) and cache a Silero VAD model keyed by its parameters.
+
+    Guarded by a lock: two transcription threads hitting the cache cold at the
+    same time must not both load the ONNX VAD model and leak one instance.
+    """
+    key = (round(float(threshold), 3), round(float(max_speech_duration), 3))
+    with _SILERO_LOCK:
+        cached = _SILERO_CACHE.get(key)
+        if cached is not None:
+            return cached
+        model = find_model_file("vad/silero_vad.onnx")
+        if model is None:
+            return None
         import sherpa_onnx
         cfg = sherpa_onnx.VadModelConfig(
             silero_vad=sherpa_onnx.SileroVadModelConfig(
@@ -473,7 +521,22 @@ def silero_vad_segments(x: np.ndarray, threshold: float = 0.5,
             sample_rate=TARGET_SR, num_threads=1,
         )
         vad = sherpa_onnx.VadModel.create(cfg)
-        win = int(vad.window_size)
+        _SILERO_CACHE[key] = vad
+        return vad
+
+
+def silero_vad_segments(x: np.ndarray, threshold: float = 0.5,
+                        max_speech_duration: float = 20.0) -> list[tuple[int, int]] | None:
+    """Neural VAD via the bundled silero_vad.onnx. Returns None if unavailable."""
+    try:
+        vad = _get_silero_vad(threshold, max_speech_duration)
+        if vad is None:
+            return None
+        # window_size is a method in current sherpa-onnx (was an attribute in
+        # older releases); calling it is required, otherwise int(method) raised
+        # and this whole neural VAD silently fell back to energy VAD forever.
+        win_attr = vad.window_size
+        win = int(win_attr() if callable(win_attr) else win_attr)
         n = len(x) // win
         flags = []
         for i in range(n):
@@ -533,14 +596,26 @@ def segment_audio(x: np.ndarray, *, use_vad: bool = True,
             start += max_len
         pieces.append([start, end])
 
-    out: list[AudioSegment] = []
+    # Short VAD pieces carry real speech.  Dropping them silently created
+    # holes in the middle of the timeline (the old tail fix only covered the
+    # end).  Absorb them into a neighbour instead, keeping max_len bounded.
+    kept: list[list[int]] = []
     for start, end in pieces:
-        if end - start < min_len:
-            continue
+        if end - start >= min_len:
+            kept.append([start, end])
+        elif kept and start - kept[-1][0] <= max_len:
+            kept[-1][1] = end
+        else:
+            kept.append([start, end])
+    if len(kept) > 1 and kept[0][1] - kept[0][0] < min_len:
+        kept[1][0] = kept[0][0]
+        kept.pop(0)
+    if not kept:
+        kept = [[0, len(x)]]
+    out: list[AudioSegment] = []
+    for start, end in kept:
         out.append(AudioSegment(start / TARGET_SR, end / TARGET_SR,
                                 np.ascontiguousarray(x[start:end])))
-    if not out:
-        out = [AudioSegment(0.0, total, x)]
     # Guarantee full coverage of the timeline (no gap swallowing trailing audio).
     if out[-1].end < total - 0.05:
         tail_start = min(len(x), int(out[-1].end * TARGET_SR))

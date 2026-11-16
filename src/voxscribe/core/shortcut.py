@@ -25,6 +25,9 @@ from .errors import ShortcutError
 log = logging.getLogger("voxscribe.shortcut")
 
 SHORTCUT_NAME = "VoxScribe.lnk"
+# A single description keeps the hover tooltip identical regardless of which
+# of the three creation strategies succeeds (COM / PowerShell / pylnk3).
+SHORTCUT_DESCRIPTION = "VoxScribe - 离线语音转文字"
 DESKTOP_CSIDL = 0x0000  # CSIDL_DESKTOPDIRECTORY
 
 
@@ -80,7 +83,7 @@ def _create_with_com(lnk: Path, exe: Path) -> str:
         sc.Targetpath = str(exe)
         sc.WorkingDirectory = str(exe.parent)
         sc.IconLocation = str(exe) + ",0"
-        sc.Description = "VoxScribe - 离线语音转文字"
+        sc.Description = SHORTCUT_DESCRIPTION
         sc.Save()
         return "com"
     finally:
@@ -100,7 +103,7 @@ _PS_TEMPLATE = (
     "$l.TargetPath={exe};"
     "$l.WorkingDirectory={work};"
     "$l.IconLocation={icon};"
-    "$l.Description='VoxScribe - Offline Speech to Text';"
+    "$l.Description={desc};"
     "$l.Save();"
 )
 
@@ -111,7 +114,7 @@ def _create_with_powershell(lnk: Path, exe: Path) -> str:
 
     script = _PS_TEMPLATE.format(
         lnk=q(str(lnk)), exe=q(str(exe)), work=q(str(exe.parent)),
-        icon=q(str(exe) + ",0"),
+        icon=q(str(exe) + ",0"), desc=q(SHORTCUT_DESCRIPTION),
     )
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     proc = subprocess.run(
@@ -128,7 +131,7 @@ def _create_with_pylnk3(lnk: Path, exe: Path) -> str:
     import pylnk3
     pylnk3.for_file(
         str(exe), lnk_name=str(lnk),
-        description="VoxScribe - Offline Speech to Text",
+        description=SHORTCUT_DESCRIPTION,
         icon_file=str(exe), work_dir=str(exe.parent),
     )
     return "pylnk3"
@@ -154,9 +157,17 @@ def read_shortcut_target(lnk: Path) -> tuple[str, str]:
             pythoncom.CoUninitialize()
     except Exception:
         pass
+    return _read_with_pylnk3(lnk)
+
+
+def _read_with_pylnk3(lnk: Path) -> tuple[str, str]:
+    """Fallback reader for environments without pywin32/COM."""
     import pylnk3
     obj = pylnk3.parse(str(lnk))
-    return str(obj.path or ""), str(obj.work_dir or obj.working_dir or "")
+    # pylnk3 releases expose the working directory under different attribute
+    # names; getattr keeps a missing attribute from aborting verification.
+    work = getattr(obj, "work_dir", None) or getattr(obj, "working_dir", None) or ""
+    return str(getattr(obj, "path", None) or ""), str(work)
 
 
 def verify_shortcut(lnk: Path, expected_exe: Path) -> tuple[bool, str]:

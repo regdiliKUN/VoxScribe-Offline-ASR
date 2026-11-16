@@ -57,6 +57,32 @@ def test_unsupported_format_is_rejected(win, tmp_path, monkeypatch):
     assert not win.transcribe_btn.isEnabled()
 
 
+def test_recording_write_failure_is_reported(win, monkeypatch):
+    """Round 76: a full disk must show a message instead of escaping a Qt slot."""
+    import numpy as np
+    from types import SimpleNamespace
+    from voxscribe.core.errors import AudioError
+
+    class FakeRecorder:
+        recording = False
+        limit_reached = False
+
+        def stop(self):
+            return SimpleNamespace(samples=np.zeros(160, dtype="float32"), duration=0.01)
+
+    win.recorder = FakeRecorder()
+    errors = []
+    monkeypatch.setattr(win, "_show_error", lambda m, d="": errors.append(m))
+
+    def boom(*_a, **_kw):
+        raise AudioError("disk full")
+
+    monkeypatch.setattr("voxscribe.ui.app.audio.write_wav", boom)
+    win._stop_record()
+    assert errors and "录音保存失败" in errors[0]
+    assert win.record_path in (None, "")
+
+
 def test_render_result_with_and_without_timestamps(win):
     win.result = TranscriptResult(
         text="今天天气很好。我们一起去公园。",

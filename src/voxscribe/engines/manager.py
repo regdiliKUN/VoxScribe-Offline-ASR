@@ -7,6 +7,7 @@ logged with its technical detail and surfaced as a short user-facing note.
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 
 import numpy as np
@@ -31,20 +32,45 @@ class EngineManager:
         self.language = language
         self.use_itn = use_itn
         self._engines: dict[str, BaseEngine] = {}
+        # Two GUI/CLI threads can request the same engine on first use; without
+        # a lock each one loads a full ONNX model and one copy leaks.
+        self._lock = threading.RLock()
+        # Availability probing stats every model file (including the 721 MB
+        # Qwen3 decoder) and parses the manifest.  A manager instance is bound
+        # to one app session, so cache the result lazily and allow explicit
+        # invalidation when models are changed at runtime.
+        self._available_cache: list[EngineSpec] | None = None
+
+    def invalidate(self) -> None:
+        """Drop cached availability and loaded engines after model changes.
+
+        Loaded engines can be marked unhealthy from a previous failure; if a
+        model is repaired on disk, keeping those instances would make the
+        engine stay broken.  Clearing both caches forces a clean re-probe and
+        a fresh recogniser on the next transcription.
+        """
+        with self._lock:
+            self._available_cache = None
+            self._engines.clear()
 
     def _get(self, spec: EngineSpec) -> BaseEngine:
-        if spec.key not in self._engines:
-            self._engines[spec.key] = create_engine(
-                spec, threads=self.threads, language=self.language, use_itn=self.use_itn)
-        return self._engines[spec.key]
+        with self._lock:
+            if spec.key not in self._engines:
+                self._engines[spec.key] = create_engine(
+                    spec, threads=self.threads, language=self.language, use_itn=self.use_itn)
+            return self._engines[spec.key]
 
     def available_specs(self) -> list[EngineSpec]:
-        out = []
-        for s in SPECS:
-            if s.missing_files() or s.integrity_issues():
-                continue
-            out.append(s)
-        return out
+        with self._lock:
+            if self._available_cache is not None:
+                return list(self._available_cache)
+            out = []
+            for s in SPECS:
+                if s.missing_files() or s.integrity_issues():
+                    continue
+                out.append(s)
+            self._available_cache = list(out)
+            return out
 
     def available_keys(self) -> list[str]:
         return [s.key for s in self.available_specs()]
@@ -78,7 +104,12 @@ class EngineManager:
     def ordered_specs(self, requested: str) -> list[EngineSpec]:
         primary = self.resolve(requested)
         rest = [s for s in self.available_specs() if s.key != primary.key]
-        return [primary, *rest]
+        specs = [primary, *rest]
+        # `healthy` used to be recorded but never consulted: a failed engine
+        # stayed first and was retried on every job.  Stable sort demotes it
+        # while preserving the configured priority among healthy engines.
+        return sorted(specs, key=lambda s: not getattr(
+            self._engines.get(s.key), "healthy", True))
 
     def transcribe(self, x: np.ndarray, requested: str = "auto", *,
                    sample_rate: int = 16000, allow_fallback: bool = True) -> tuple[str, str, list[EngineAttempt]]:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -173,16 +174,16 @@ class BaseEngine(ABC):
             raise EngineError("语音识别失败", detail=f"{self.key}: {exc}", cause=exc) from exc
 
 
-_TAG_RE = None
+_TAG_RE = re.compile(r"<\|[^|]*\|>")
+_INVISIBLE_RE = re.compile(r"[\u200b\ufeff]")
 
 
 def clean_text(text: str) -> str:
-    """Strip SenseVoice control tags and collapse exotic whitespace."""
-    global _TAG_RE
-    if _TAG_RE is None:
-        import re
-        _TAG_RE = re.compile(r"<\|[^|]*\|>")
-    import re
+    """Strip SenseVoice control tags and invisible characters.
+
+    Patterns are compiled once at import time: this runs on every recognised
+    segment, so avoiding per-call ``import re`` / recompilation keeps the hot
+    path lean and the code easier to read.
+    """
     text = _TAG_RE.sub("", text or "")
-    text = re.sub(r"[\u200b\ufeff]", "", text)
-    return text.strip()
+    return _INVISIBLE_RE.sub("", text).strip()

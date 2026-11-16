@@ -30,6 +30,79 @@ def test_load_mp3_natively_without_ffmpeg(fixtures, monkeypatch):
     assert a.rms > 0.001
 
 
+def test_silero_vad_is_actually_available_when_model_present():
+    """Silero VAD must not silently fall back to energy VAD on API changes."""
+    from voxscribe.core.paths import find_model_file
+    if find_model_file("vad/silero_vad.onnx") is None:
+        pytest.skip("VAD model not installed")
+    sr = 16000
+    # Speech-like modulated tone; the point is that the neural VAD runs at all.
+    t = np.arange(sr) / sr
+    x = (0.3 * np.sin(2 * np.pi * 200 * t) *
+         (0.5 + 0.5 * np.sin(2 * np.pi * 3 * t))).astype("float32")
+    result = audio.silero_vad_segments(x)
+    assert result is not None          # None means it errored out and bailed
+    assert isinstance(result, list)
+
+
+def test_silero_vad_cache_is_thread_safe():
+    from concurrent.futures import ThreadPoolExecutor
+    from voxscribe.core.paths import find_model_file
+    if find_model_file("vad/silero_vad.onnx") is None:
+        pytest.skip("VAD model not installed")
+    audio._SILERO_CACHE.clear()
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        results = list(ex.map(lambda _: audio._get_silero_vad(0.5, 20.0), range(6)))
+    assert len({id(v) for v in results}) == 1   # one shared instance
+    assert len(audio._SILERO_CACHE) == 1
+
+
+def test_silero_vad_model_is_cached():
+    from voxscribe.core.paths import find_model_file
+    if find_model_file("vad/silero_vad.onnx") is None:
+        pytest.skip("VAD model not installed")
+    audio._SILERO_CACHE.clear()
+    v1 = audio._get_silero_vad(0.5, 20.0)
+    v2 = audio._get_silero_vad(0.5, 20.0)
+    assert v1 is v2
+    assert len(audio._SILERO_CACHE) == 1
+
+
+def test_load_audio_wraps_stat_permission_error(tmp_path, monkeypatch):
+    """A stat() failure (TOCTOU/permission) must surface as a typed AudioError."""
+    f = tmp_path / "gone.wav"
+    f.write_bytes(b"RIFFxxxx")
+
+    def boom(self, *a, **kw):
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(Path, "stat", boom)
+    with pytest.raises(AudioError):
+        audio.load_audio(f)
+
+
+def test_resample_decimation_suppresses_aliasing():
+    """A 20 kHz tone must not fold into the speech band on 44.1k->16k decimation."""
+    sr = 44100
+    t = np.arange(sr) / sr
+    hf = (0.5 * np.sin(2 * np.pi * 20000 * t)).astype("float32")
+    y = audio.resample(hf, sr, 16000)
+    # With anti-aliasing the folded high-frequency energy is damped by several
+    # times versus the source tone (~0.354 rms); plain interpolation leaves it
+    # nearly intact.
+    src_rms = float(np.sqrt(np.mean(hf ** 2)))
+    out_rms = float(np.sqrt(np.mean(y ** 2)))
+    assert out_rms < src_rms * 0.35
+    assert len(y) == 16000
+
+
+def test_resample_upsampling_and_identity():
+    x = np.sin(np.arange(160) / 10).astype("float32")
+    assert np.array_equal(audio.resample(x, 16000, 16000), x)
+    up = audio.resample(x, 8000, 16000)
+    assert len(up) == 320 and np.isfinite(up).all()
+
+
 def test_stereo_44100_is_downmixed_and_resampled(fixtures):
     a = audio.load_audio(fixtures / "hard_stereo441.wav")
     assert a.sample_rate == 16000
@@ -106,6 +179,23 @@ def test_segment_short_audio_single_chunk(fixtures):
     segs = audio.segment_audio(a.samples, use_vad=True, max_segment_seconds=25.0)
     assert len(segs) == 1
     assert segs[0].start == 0.0
+
+
+def test_normalize_keeps_hot_float_audio_audible():
+    """Round 65: peak 10 used to be divided by 32768 and become silence."""
+    x = np.array([0.0, 10.0, -10.0, 5.0], dtype="float32")
+    y = audio.normalize(x, 16000)
+    assert float(np.max(np.abs(y))) > 0.9
+
+
+def test_segment_audio_absorbs_short_middle_piece(monkeypatch):
+    """Round 68: short VAD hits must not create holes in the timeline."""
+    x = np.zeros(3 * 16000, dtype="float32")
+    monkeypatch.setattr(audio, "silero_vad_segments",
+                        lambda *a, **kw: [(0, 8000), (20000, 24000), (40000, 48000)])
+    segs = audio.segment_audio(x, use_vad=True, max_segment_seconds=25.0,
+                               min_segment_seconds=0.30)
+    assert any(s.start <= 1.25 < s.end for s in segs)
 
 
 def test_device_enumeration_never_raises():

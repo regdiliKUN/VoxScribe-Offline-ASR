@@ -367,7 +367,13 @@ class MainWindow(QMainWindow):
         rec_dir = user_data_dir() / "recordings"
         rec_dir.mkdir(parents=True, exist_ok=True)
         p = rec_dir / f"录音-{datetime.now():%Y%m%d-%H%M%S}.wav"
-        audio.write_wav(p, data.samples)
+        try:
+            audio.write_wav(p, data.samples)
+        except (VoxScribeError, OSError) as exc:
+            # A full/read-only disk must not escape a Qt slot as a raw
+            # traceback; tell the user and keep the recording in memory.
+            self._show_error("录音保存失败，请检查磁盘空间或保存目录权限。", str(exc))
+            return
         self.record_path = p
         self._set_source(str(p))
         log.info("Recording saved: %s (%.2fs)", p, data.duration)

@@ -65,6 +65,55 @@ def test_build_manifest_creates_hashes(tmp_path):
     assert (root / "manifest.json").is_file()
 
 
+def test_build_manifest_excludes_transient_files(tmp_path):
+    """Interrupted-download leftovers must not be treated as model assets."""
+    root = tmp_path / "m"
+    (root / "_downloads").mkdir(parents=True)
+    (root / "real.onnx").write_bytes(b"model")
+    (root / "partial.onnx.part").write_bytes(b"half")
+    (root / "scratch.tmp").write_bytes(b"x")
+    (root / "_downloads" / "cached.bin").write_bytes(b"cache")
+    data = integrity.build_manifest(root)
+    assert set(data["files"]) == {"real.onnx"}
+
+
+def test_build_manifest_custom_skip_pattern(tmp_path):
+    root = tmp_path / "m"
+    root.mkdir()
+    (root / "keep.bin").write_bytes(b"1")
+    (root / "drop.bin").write_bytes(b"2")
+    data = integrity.build_manifest(root, skip_patterns=("drop.*",))
+    assert set(data["files"]) == {"keep.bin"}
+
+
+def test_verify_full_reads_manifest_once(monkeypatch, fake_models):
+    calls = {"n": 0}
+    real = integrity.load_manifest
+
+    def counted():
+        calls["n"] += 1
+        return real()
+
+    monkeypatch.setattr(integrity, "load_manifest", counted)
+    integrity.verify_full()
+    assert calls["n"] == 1
+
+
+def test_corrupt_manifest_structure_is_tolerated(tmp_path, monkeypatch):
+    """A malformed 'files' section must not crash quick/full verification."""
+    root = tmp_path / "models"
+    root.mkdir()
+    (root / "fake.bin").write_bytes(b"x")
+    (root / "manifest.json").write_text(
+        json.dumps({"files": ["not", "a", "mapping"]}), encoding="utf-8")
+    monkeypatch.setattr(integrity, "models_dir", lambda: root)
+    monkeypatch.setattr(integrity, "find_model_file",
+                        lambda rel: (root / rel) if (root / rel).is_file() else None)
+    assert integrity.load_manifest() == {}
+    assert integrity.verify_quick() == []
+    assert integrity.verify_full() == []
+
+
 def test_engine_excluded_when_model_truncated(monkeypatch):
     """A truncated model must be removed from the failover chain."""
     import voxscribe.engines.base as base
@@ -77,6 +126,43 @@ def test_engine_excluded_when_model_truncated(monkeypatch):
     m = EngineManager()
     assert "sensevoice" not in m.available_keys()
     assert "损坏" in m.missing_summary()
+
+
+def test_selftest_engine_availability_matches_integrity(monkeypatch, capsys):
+    """A truncated model must be reported unavailable consistently in JSON."""
+    import voxscribe.engines.base as base
+    from voxscribe import main as main_mod
+
+    def broken(self):
+        return (["size mismatch"] if self.key == "sensevoice" else [])
+
+    monkeypatch.setattr(base.EngineSpec, "integrity_issues", broken)
+    code = main_mod.selftest()
+    data = json.loads(capsys.readouterr().out)
+    assert data["engines"]["sensevoice"]["available"] is False
+    assert data["engines"]["sensevoice"]["integrity_issues"] == ["size mismatch"]
+    assert "sensevoice" not in data["available_engines"]
+
+
+def test_manifest_infinite_size_does_not_crash_quick_verify(fake_models):
+    """Round 64: a JSON 1e999 used to raise OverflowError at startup."""
+    root, _f = fake_models
+    (root / "manifest.json").write_text(json.dumps({
+        "files": {"fake.bin": {"size": float("inf"), "sha256": "x"}}
+    }), encoding="utf-8")
+    assert integrity.verify_quick() == []
+
+
+def test_quick_verify_tolerates_stat_permission_error(monkeypatch):
+    """Round 69: TOCTOU/stat failures must become issues, not exceptions."""
+    class Vanished:
+        def stat(self):
+            raise PermissionError("file locked")
+
+    monkeypatch.setattr(integrity, "find_model_file", lambda rel: Vanished())
+    issues = integrity.verify_quick({"a.bin": {"size": 10}})
+    assert issues and issues[0].path == "a.bin"
+    assert "无法读取文件大小" in issues[0].problem
 
 
 def test_selftest_reports_integrity():

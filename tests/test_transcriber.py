@@ -21,6 +21,34 @@ def test_join_texts_cjk_and_latin():
     assert join_texts(["", "  ", "abc "]) == "abc"
 
 
+def test_join_texts_boundary_after_cjk_segment():
+    """Latin segments get spaces based on adjacent boundaries, not whole history."""
+    assert join_texts(["你好", "world", "again"]) == "你好world again"
+    assert join_texts(["中文", "hello", "world"]) == "中文hello world"
+    assert join_texts(["hello", "world", "中文", "foo", "bar"]) == \
+        "hello world中文foo bar"
+    assert join_texts(["abc", "中文", "def"]) == "abc中文def"
+    # ASCII sentence punctuation followed by a Latin word needs a space
+    assert join_texts(["Hello.", "world"]) == "Hello. world"
+    assert join_texts(["Hello,", "world"]) == "Hello, world"
+    # CJK numeric runs must NOT get a space between digit chunks
+    assert join_texts(["第1", "2章"]) == "第12章"
+    assert join_texts(["售价", "19", "元"]) == "售价19元"
+
+
+def test_result_carries_timing_metrics(fixtures, models_root):
+    """Transcription results expose wall time and RTF for observability."""
+    if models_root is None:
+        pytest.skip("models not installed")
+    p = TranscriptionPipeline(engine="sensevoice")
+    r = p.transcribe_file(fixtures / "zh_01_daily.wav")
+    assert r.elapsed > 0
+    assert r.rtf > 0
+    assert abs(r.rtf - r.elapsed / r.duration) < 0.01
+    d = json.loads(r.to_json())
+    assert "elapsed" in d and "rtf" in d
+
+
 def test_result_json_roundtrip():
     r = TranscriptResult(text="测试", engine="sensevoice", duration=1.5,
                          segments=[TranscriptSegment(0, 1, "测试")])

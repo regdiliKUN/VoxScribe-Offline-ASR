@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -13,6 +14,16 @@ from .paths import history_file
 from .transcriber import TranscriptResult
 
 log = logging.getLogger("voxscribe.history")
+
+
+def _safe_int(value, default: int) -> int:
+    """Coerce pagination args defensively; bad input falls back to default."""
+    try:
+        result = int(value)
+        return result if math.isfinite(result) else default
+    except (TypeError, ValueError, OverflowError):
+        return default
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS transcripts (
@@ -108,16 +119,20 @@ class HistoryDB:
         raw_warnings = d.pop("warnings_json", "[]")
         for key, raw in (("segments", raw_segments), ("warnings", raw_warnings)):
             try:
-                d[key] = json.loads(raw or "[]")
+                parsed = json.loads(raw or "[]")
             except (json.JSONDecodeError, TypeError):
-                d[key] = []
+                parsed = []
+            # Valid JSON of the wrong type (e.g. `123` or `null`) used to be
+            # stored verbatim and blow up later in export/UI iteration.
+            d[key] = parsed if isinstance(parsed, list) else []
         return d
 
     def list(self, limit: int = 50, offset: int = 0) -> list[dict]:
         with self._lock, self._session() as conn:
             rows = conn.execute(
                 "SELECT * FROM transcripts ORDER BY id DESC LIMIT ? OFFSET ?",
-                (max(1, min(1000, int(limit))), max(0, int(offset)))).fetchall()
+                (max(1, min(1000, _safe_int(limit, 50))),
+                 max(0, _safe_int(offset, 0)))).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     def get(self, rec_id: int) -> dict | None:
@@ -125,12 +140,24 @@ class HistoryDB:
             row = conn.execute("SELECT * FROM transcripts WHERE id=?", (rec_id,)).fetchone()
         return self._row_to_dict(row) if row else None
 
+    @staticmethod
+    def _like_pattern(keyword: str) -> str:
+        """Escape LIKE metacharacters so the keyword is matched literally."""
+        escaped = (str(keyword).replace("\\", "\\\\")
+                              .replace("%", "\\%").replace("_", "\\_"))
+        return f"%{escaped}%"
+
     def search(self, keyword: str, limit: int = 50) -> list[dict]:
+        # A cleared search box or a bad caller passes None: treat it as "no
+        # keyword" rather than searching for the literal text "None".
+        if keyword is None or not isinstance(keyword, str):
+            return []
+        pattern = self._like_pattern(keyword)
         with self._lock, self._session() as conn:
             rows = conn.execute(
-                "SELECT * FROM transcripts WHERE text LIKE ? OR source LIKE ?"
-                " ORDER BY id DESC LIMIT ?",
-                (f"%{keyword}%", f"%{keyword}%", max(1, min(1000, int(limit))))).fetchall()
+                "SELECT * FROM transcripts WHERE text LIKE ? ESCAPE '\\'"
+                " OR source LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?",
+                (pattern, pattern, max(1, min(1000, _safe_int(limit, 50))))).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     def delete(self, rec_id: int) -> bool:

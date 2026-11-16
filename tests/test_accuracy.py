@@ -14,6 +14,51 @@ def test_cer_helper():
     assert normalize("<|zh|><|NEUTRAL|>今天，天气很好！") == "今天天气很好"
 
 
+def test_evaluate_marks_engine_failures_as_full_miss(monkeypatch):
+    """A crashed engine must score CER 1.0, not a flattering string similarity."""
+    import evaluate as ev
+
+    def boom(self, *a, **kw):
+        raise RuntimeError("engine down")
+
+    monkeypatch.setattr(ev.EngineManager, "transcribe", boom)
+    result = ev.evaluate("auto", ids={"zh_01_daily"})
+    assert result["samples"] >= 1
+    row = next(r for r in result["rows"] if r["id"] == "zh_01_daily")
+    assert row["failed"] is True
+    assert row["cer"] == 1.0
+    assert row["engine"] == "none"
+
+
+def test_evaluate_rtf_excludes_failed_samples(monkeypatch):
+    """Round 80: instant failures must not produce a flattering near-zero RTF."""
+    import evaluate as ev
+
+    def boom(self, *a, **kw):
+        raise RuntimeError("engine down")
+
+    monkeypatch.setattr(ev.EngineManager, "transcribe", boom)
+    result = ev.evaluate("auto", ids={"zh_01_daily"})
+    assert result["rtf"] == 0.0
+    assert result["failed_samples"] >= 1
+
+
+def test_evaluate_counts_missing_audio_as_full_miss(monkeypatch, tmp_path):
+    """Round 82: silently skipping fixtures inflated accuracy claims."""
+    import json
+    import evaluate as ev
+
+    (tmp_path / "manifest.json").write_text(json.dumps([
+        {"id": "missing_01", "wav": "nope.wav", "text": "今天天气很好"}
+    ], ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(ev, "FIXTURES", tmp_path)
+    result = ev.evaluate("auto")
+    assert result["samples"] == 1
+    assert result["missing_samples"] == 1
+    assert result["failed_samples"] == 1
+    assert result["rows"][0]["cer"] == 1.0
+
+
 def test_cer_digit_normalisation():
     assert cer("二零二六年", "2026年") == 0.0
 

@@ -92,8 +92,15 @@ def models_dir(create: bool = False) -> Path:
 
 
 def find_model_file(relative: str) -> Path | None:
-    """Find a model asset relative to any of the model roots."""
+    """Find a model asset relative to any of the model roots.
+
+    Rejects absolute paths and parent traversal: ``root / absolute`` silently
+    discards ``root`` in pathlib, which would let a malformed manifest entry
+    read an arbitrary file outside the model directory.
+    """
     rel = Path(relative)
+    if rel.is_absolute() or ".." in rel.parts:
+        return None
     for root in _candidate_model_dirs():
         p = root / rel
         if p.is_file():

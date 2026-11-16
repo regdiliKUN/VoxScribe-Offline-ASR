@@ -59,6 +59,18 @@ def test_engine_handles_silence_without_crash(fixtures, models_root, manager):
     assert len(text) < 30, f"unexpected hallucination on silence: {text!r}"
 
 
+def test_invalidate_drops_unhealthy_engine_instances():
+    """After invalidate(), a repaired model gets a fresh healthy engine."""
+    m = EngineManager()
+    e1 = m._get(SPECS_BY_KEY["sensevoice"])
+    e1.mark_unhealthy("old error")
+    assert e1.healthy is False
+    m.invalidate()
+    e2 = m._get(SPECS_BY_KEY["sensevoice"])
+    assert e2 is not e1
+    assert e2.healthy is True
+
+
 def test_missing_models_raise_model_error(monkeypatch):
     import voxscribe.engines.base as base
     monkeypatch.setattr(base, "find_model_file", lambda _rel: None)
@@ -83,3 +95,42 @@ def test_failover_when_primary_engine_fails(fixtures, models_root, monkeypatch):
     assert used != "qwen3"
     assert "天气" in text
     assert attempts[0].ok is False and attempts[-1].ok is True
+
+
+def test_unhealthy_engine_is_demoted_in_failover_order(monkeypatch):
+    """Round 74: `healthy=False` used to be recorded but never consulted."""
+    m = EngineManager()
+    specs = list(SPECS)
+    monkeypatch.setattr(m, "available_specs", lambda: specs)
+    monkeypatch.setattr(m, "resolve", lambda _req: specs[0])
+
+    class Broken:
+        healthy = False
+
+    m._engines[specs[0].key] = Broken()
+    assert m.ordered_specs("auto")[0].key != specs[0].key
+
+
+def test_engine_creation_is_thread_safe(monkeypatch):
+    """Round 75: two first-use threads must not load two full models."""
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+    import voxscribe.engines.manager as manager_mod
+
+    calls = []
+
+    class FakeEngine:
+        pass
+
+    def fake_create(spec, **kw):
+        calls.append(spec.key)
+        time.sleep(0.01)
+        return FakeEngine()
+
+    monkeypatch.setattr(manager_mod, "create_engine", fake_create)
+    m = EngineManager()
+    spec = SPECS_BY_KEY["paraformer"]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        engines = list(pool.map(lambda _: m._get(spec), range(20)))
+    assert len({id(e) for e in engines}) == 1
+    assert calls == ["paraformer"]

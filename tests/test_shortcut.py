@@ -75,6 +75,32 @@ def test_missing_exe_raises(tmp_path, fake_desktop):
         shortcut.create_shortcut(tmp_path / "nope.exe", desktop=fake_desktop)
 
 
+def test_all_creation_strategies_share_one_description():
+    """COM / PowerShell / pylnk3 must produce the same hover tooltip."""
+    import inspect
+    src = inspect.getsource(shortcut)
+    assert "VoxScribe - Offline Speech to Text" not in src
+    assert src.count("SHORTCUT_DESCRIPTION") >= 4  # constant + 3 strategies
+
+
+def test_read_with_pylnk3_tolerates_missing_workdir(monkeypatch, tmp_path):
+    """A pylnk3 link lacking work_dir/working_dir must not crash verification."""
+    import sys
+    import types
+
+    class _Obj:
+        path = r"C:\Program Files\VoxScribe.exe"
+        # deliberately no work_dir / working_dir attributes
+
+    fake = types.ModuleType("pylnk3")
+    fake.parse = lambda _p: _Obj()
+    monkeypatch.setitem(sys.modules, "pylnk3", fake)
+
+    target, work = shortcut._read_with_pylnk3(tmp_path / "x.lnk")
+    assert target.endswith("VoxScribe.exe")
+    assert work == ""
+
+
 def test_verify_rejects_nonexistent_link(fake_exe, tmp_path):
     ok, why = shortcut.verify_shortcut(tmp_path / "missing.lnk", fake_exe)
     assert not ok and "不存在" in why

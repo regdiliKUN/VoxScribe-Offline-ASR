@@ -87,6 +87,69 @@ def test_history_add_get_list_search_delete(tmp_path):
     assert db.delete(rid) and db.count() == 0
 
 
+def test_add_recent_deduplicates_case_insensitively(tmp_path):
+    s = SettingsStore(tmp_path / "settings.json")
+    s.load()
+    s.add_recent(r"D:\Audio\a.wav")
+    s.add_recent(r"d:\audio\A.WAV")
+    s.add_recent("   ")
+    assert s.data.recent_files == [r"d:\audio\A.WAV"]
+
+
+def test_reset_restores_and_returns_defaults(tmp_path):
+    p = tmp_path / "settings.json"
+    s = SettingsStore(p)
+    s.load()
+    s.update(engine="paraformer", threads=7, theme="light")
+    restored = s.reset()
+    assert restored is s.data
+    assert restored.engine == "auto" and restored.threads == 0
+    assert restored.theme == "dark"
+    # persisted to disk
+    s2 = SettingsStore(p); s2.load()
+    assert s2.data.engine == "auto" and s2.data.threads == 0
+
+
+def test_clamp_repairs_ill_typed_values_without_crashing(tmp_path):
+    """A corrupt/ill-typed field must fall back, never raise (crash-safe config)."""
+    s = Settings(threads="oops", vad_threshold="bad", sample_rate=float("nan"),
+                 max_record_seconds=None, recent_files="not-a-list")
+    s.clamp()
+    assert s.threads == 0
+    assert s.vad_threshold == 0.5
+    assert s.sample_rate == 16000
+    assert s.max_record_seconds == 7200
+    assert s.recent_files == []
+
+    store = SettingsStore(tmp_path / "settings.json")
+    store.load()
+    store.update(threads="oops", vad_threshold="bad")  # must not raise
+    assert store.data.threads == 0 and store.data.vad_threshold == 0.5
+
+
+def test_history_search_treats_like_wildcards_literally(tmp_path):
+    db = HistoryDB(tmp_path / "h.sqlite3")
+    db.add(TranscriptResult(text="完成率100%", source="alpha"))
+    db.add(TranscriptResult(text="plain text", source="beta"))
+    # A bare '%' / '_' must not act as a SQL wildcard.
+    assert [r["text"] for r in db.search("%")] == ["完成率100%"]
+    assert db.search("_") == []
+    assert [r["text"] for r in db.search("100%")] == ["完成率100%"]
+    assert [r["text"] for r in db.search("plain")] == ["plain text"]
+    # None / non-string keywords are treated as "no keyword"
+    assert db.search(None) == []
+    assert db.search(123) == []
+
+
+def test_history_pagination_tolerates_bad_types(tmp_path):
+    db = HistoryDB(tmp_path / "h.sqlite3")
+    db.add(TranscriptResult(text="hello"))
+    assert len(db.list(limit="bad")) == 1          # falls back to default 50
+    assert len(db.list(offset=None)) == 1
+    assert len(db.list(limit=float("nan"))) == 1
+    assert len(db.search("hello", limit="bad")) == 1
+
+
 def test_history_clear_and_pagination(tmp_path):
     db = HistoryDB(tmp_path / "h.sqlite3")
     for _ in range(5):
@@ -133,3 +196,35 @@ def test_qwen3_setting_survives_save_and_reload(tmp_path):
     assert SettingsStore(p).load().engine == "auto"
     p.write_text(json.dumps({"engine": "vosk"}), encoding="utf-8")
     assert SettingsStore(p).load().engine == "auto"
+
+
+def test_infinite_numeric_setting_does_not_quarantine_whole_file(tmp_path):
+    """Round 63: one 1e999 field must not reset every other preference."""
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"threads": float("inf"), "engine": "paraformer"}),
+                 encoding="utf-8")
+    store = SettingsStore(p)
+    loaded = store.load()
+    assert store.load_error is None
+    assert loaded.engine == "paraformer"
+    assert not p.with_suffix(p.suffix + ".bad").exists()
+
+
+def test_clamp_deduplicates_and_drops_blank_recent_files():
+    """Round 70: hand-edited recent files must match add_recent() semantics."""
+    s = Settings(recent_files=["", "D:/A.wav", "d:\\a.wav", "  ", "B.wav"])
+    s.clamp()
+    assert s.recent_files == ["D:/A.wav", "B.wav"]
+
+
+def test_history_rejects_valid_json_of_wrong_type(tmp_path):
+    """Round 71: segments_json='123' used to crash the export/UI iterator."""
+    db = HistoryDB(tmp_path / "h.db")
+    result = TranscriptResult(text="你好", segments=[TranscriptSegment(0, 1, "你好")])
+    rid = db.add(result)
+    with sqlite3.connect(db.path) as conn:
+        conn.execute("UPDATE transcripts SET segments_json='123', warnings_json='null' WHERE id=?",
+                     (rid,))
+    row = db.get(rid)
+    assert row["segments"] == []
+    assert row["warnings"] == []

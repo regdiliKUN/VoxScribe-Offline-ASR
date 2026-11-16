@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import tempfile
 import threading
@@ -22,6 +23,29 @@ from .paths import settings_file
 # Defined here (rather than imported) to avoid a config -> engines import cycle.
 VALID_ENGINES = ("auto", "qwen3", "sensevoice", "paraformer")
 VALID_LANGUAGES = ("auto", "zh", "en", "ja", "ko", "yue")
+
+
+def _as_int(value, default: int) -> int:
+    """Best-effort int conversion; corrupt values fall back instead of raising.
+
+    ``json.loads('1e999')`` yields ``inf``; ``int(inf)`` raises OverflowError.
+    Without this guard one bad numeric field quarantines the whole settings
+    file and silently resets every user preference.
+    """
+    try:
+        f = float(value)
+        return int(f) if math.isfinite(f) else default
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _as_float(value, default: float) -> float:
+    """Best-effort float conversion; NaN/Inf/corrupt values fall back."""
+    try:
+        f = float(value)
+        return f if math.isfinite(f) else default
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
@@ -61,14 +85,20 @@ class Settings:
     log_level: str = "INFO"
 
     def clamp(self) -> None:
-        """Silently repair out-of-range values (e.g. hand-edited JSON)."""
-        self.threads = max(0, min(16, int(self.threads or 0)))
-        self.sample_rate = 16000 if self.sample_rate not in (8000, 16000, 32000, 44100, 48000) else self.sample_rate
-        self.max_record_seconds = max(5, min(12 * 3600, int(self.max_record_seconds)))
-        self.vad_threshold = max(0.05, min(0.95, float(self.vad_threshold)))
-        self.max_segment_seconds = max(5.0, min(120.0, float(self.max_segment_seconds)))
-        self.min_segment_seconds = max(0.05, min(5.0, float(self.min_segment_seconds)))
-        self.silence_guard_db = max(-100.0, min(0.0, float(self.silence_guard_db)))
+        """Silently repair out-of-range *and ill-typed* values.
+
+        Settings can come from a hand-edited JSON file or a programmatic
+        ``update()``; a single non-numeric field must never crash startup, so
+        every numeric coercion goes through a guarded helper.
+        """
+        self.threads = max(0, min(16, _as_int(self.threads, 0)))
+        sr = _as_int(self.sample_rate, 16000)
+        self.sample_rate = sr if sr in (8000, 16000, 32000, 44100, 48000) else 16000
+        self.max_record_seconds = max(5, min(12 * 3600, _as_int(self.max_record_seconds, 7200)))
+        self.vad_threshold = max(0.05, min(0.95, _as_float(self.vad_threshold, 0.5)))
+        self.max_segment_seconds = max(5.0, min(120.0, _as_float(self.max_segment_seconds, 25.0)))
+        self.min_segment_seconds = max(0.05, min(5.0, _as_float(self.min_segment_seconds, 0.30)))
+        self.silence_guard_db = max(-100.0, min(0.0, _as_float(self.silence_guard_db, -60.0)))
         if self.export_encoding not in ("utf-8-sig", "utf-8", "gb18030"):
             self.export_encoding = "utf-8-sig"
         if self.engine not in VALID_ENGINES:
@@ -77,10 +107,28 @@ class Settings:
             self.language = "auto"
         if self.theme not in ("dark", "light"):
             self.theme = "dark"
-        self.recent_files = [str(x) for x in self.recent_files][:20]
+        recent = self.recent_files if isinstance(self.recent_files, list) else []
+        seen: set[str] = set()
+        cleaned: list[str] = []
+        for item in recent:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            key = _recent_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(item)
+            if len(cleaned) >= 20:
+                break
+        self.recent_files = cleaned
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _recent_key(path: str) -> str:
+    """Windows paths are case-insensitive; share one key for all de-duplication."""
+    return path.replace("\\", "/").lower()
 
 
 _LOCK = threading.Lock()
@@ -153,12 +201,25 @@ class SettingsStore:
         return self._settings
 
     def add_recent(self, path: str) -> None:
-        items = [p for p in self._settings.recent_files if p != path]
+        if not isinstance(path, str) or not path.strip():
+            return
+        # Windows paths are case-insensitive; normalise for de-duplication so
+        # D:\A.wav and d:\a.wav are not stored as two separate recent entries.
+        wanted = _recent_key(path)
+        items = [p for p in self._settings.recent_files
+                 if isinstance(p, str) and _recent_key(p) != wanted]
         items.insert(0, path)
         self.update(recent_files=items[:20])
 
     def reset(self) -> Settings:
-        return self.save(Settings()) or self._settings
+        """Restore defaults, persist them, and return the live settings.
+
+        ``save()`` intentionally returns None, so the previous
+        ``save(...) or self._settings`` relied on a truthiness accident.  Use
+        an explicit sequence so the behaviour is obvious and type-correct.
+        """
+        self.save(Settings())
+        return self._settings
 
 
 _STORE: SettingsStore | None = None

@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import threading
 import time
-from dataclasses import asdict, dataclass, field
+from collections import Counter
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -55,6 +55,9 @@ class TranscriptResult:
     created_at: str = ""
     warnings: list[str] = field(default_factory=list)
     audio_path: str = ""
+    elapsed: float = 0.0                 # wall-clock seconds spent transcribing
+    rtf: float = 0.0                     # elapsed / audio duration (lower is faster)
+    failed_segments: int = 0             # segments lost to engine/runtime errors
 
     def __post_init__(self):
         if not self.created_at:
@@ -65,28 +68,53 @@ class TranscriptResult:
         return not self.text.strip()
 
     def as_dict(self) -> dict:
-        return {
-            **{k: v for k, v in asdict(self).items() if k != "segments"},
-            "segments": [s.as_dict() for s in self.segments],
-        }
+        # Build scalar fields directly instead of asdict(self): asdict deep-
+        # copies every segment, then we discard that copy and rebuild the list.
+        # Using fields() keeps this robust when new scalar fields are added.
+        data = {f.name: getattr(self, f.name)
+                for f in fields(self) if f.name != "segments"}
+        data["segments"] = [s.as_dict() for s in self.segments]
+        return data
 
     def to_json(self, *, indent: int = 2) -> str:
         return json.dumps(self.as_dict(), ensure_ascii=False, indent=indent)
 
 
-_LATIN = re.compile(r"^[A-Za-z0-9\s.,!?'\"-]+$")
+def _is_ascii_letter(ch: str) -> bool:
+    return ("a" <= ch <= "z") or ("A" <= ch <= "Z")
+
+
+def _is_ascii_letter_or_digit(ch: str) -> bool:
+    return _is_ascii_letter(ch) or ("0" <= ch <= "9")
+
+
+def _needs_space(prev: str, nxt: str) -> bool:
+    """Whether a separating space belongs between two adjacent chunks.
+
+    Only Latin word boundaries get a space: an ASCII letter (or a trailing
+    ASCII sentence punctuation) followed by an ASCII *letter*.  Digits are
+    deliberately excluded as the leading character so CJK numeric runs such
+    as ``["第1", "2章"]`` stay ``第12章`` instead of ``第1 2章``.
+    """
+    if not prev or not nxt:
+        return False
+    left_ok = _is_ascii_letter_or_digit(prev[-1]) or prev[-1] in ".,!?;:"
+    return left_ok and _is_ascii_letter(nxt[0])
 
 
 def join_texts(texts: list[str]) -> str:
-    """Join chunks naturally: no space between CJK, one space between Latin words."""
+    """Join chunks using the boundary characters of adjacent segments.
+
+    Deciding on the *boundary* (rather than the whole accumulated string)
+    keeps spaces between later Latin segments even after a CJK segment has
+    appeared, while never inserting one inside CJK/numeric contexts.
+    """
     out = ""
     for t in texts:
         t = t.strip()
         if not t:
             continue
-        if not out:
-            out = t
-        elif _LATIN.match(out) and _LATIN.match(t):
+        if out and _needs_space(out, t):
             out = out + " " + t
         else:
             out = out + t
@@ -135,14 +163,16 @@ class TranscriptionPipeline:
         warnings: list[str] = []
         if data.duration <= 0 or data.samples.size == 0:
             return TranscriptResult(source=source, audio_path=audio_path,
-                                    warnings=["音频为空，未进行识别。"])
+                                    warnings=["音频为空，未进行识别。"],
+                                    elapsed=round(time.perf_counter() - started, 3))
 
         if data.is_silent:
             warnings.append("未检测到有效语音（音频接近静音）。")
             log.info("Nearly silent input (rms=%s); skipping recognition", data.rms)
             _emit(progress, "done", 1, 1, "未检测到语音")
             return TranscriptResult(source=source, audio_path=audio_path,
-                                    duration=data.duration, warnings=warnings)
+                                    duration=data.duration, warnings=warnings,
+                                    elapsed=round(time.perf_counter() - started, 3))
 
         _emit(progress, "segment", 0, 1, "正在分析语音段落…")
         try:
@@ -164,6 +194,7 @@ class TranscriptionPipeline:
 
         results: list[TranscriptSegment] = []
         used_engines: list[str] = []
+        failed_segments = 0
         total = len(segs)
         for i, seg in enumerate(segs):
             if cancel and cancel.is_set():
@@ -184,24 +215,32 @@ class TranscriptionPipeline:
                     results.append(TranscriptSegment(
                         round(seg.start, 3), round(seg.end, 3), text.strip(), used))
             except EngineError as exc:
+                failed_segments += 1
                 warnings.append(f"第 {i + 1} 段识别失败：{exc}")
                 log.error("Segment %s failed: %s", i + 1, exc.detail)
             except Exception as exc:  # never let one segment kill the whole job
+                failed_segments += 1
                 warnings.append(f"第 {i + 1} 段出现未预期错误，已跳过。")
                 log.exception("Unexpected error in segment %s: %s", i + 1, exc)
 
-        engine = max(set(used_engines), key=used_engines.count) if used_engines else ""
+        # Counter.most_common keeps first-seen order on ties, so the reported
+        # engine is deterministic and reproducible across runs.
+        engine = Counter(used_engines).most_common(1)[0][0] if used_engines else ""
         text = join_texts([s.text for s in results])
         if not text:
             warnings.append("未能识别出文字，请尝试更换引擎或检查录音质量。")
         elapsed = time.perf_counter() - started
-        log.info("Transcription done: %s segments, %.2fs audio, %.2fs wall, engine=%s",
-                 len(results), data.duration, elapsed, engine)
+        rtf = elapsed / data.duration if data.duration > 0 else 0.0
+        log.info("Transcription done: %s segments, %.2fs audio, %.2fs wall, "
+                 "RTF=%.3f, engine=%s",
+                 len(results), data.duration, elapsed, rtf, engine)
         _emit(progress, "done", total, total, "识别完成")
         return TranscriptResult(
             segments=results, text=text, engine=engine, source=source,
             duration=round(data.duration, 3), warnings=warnings,
             audio_path=audio_path,
+            elapsed=round(elapsed, 3), rtf=round(rtf, 4),
+            failed_segments=failed_segments,
         )
 
 

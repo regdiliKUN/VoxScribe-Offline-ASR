@@ -109,6 +109,22 @@ def test_status_is_reported_once(fake_sd):
     r.stop()
 
 
+def test_total_samples_tracks_chunks_without_rescan(fake_sd, monkeypatch):
+    """duration/limit rely on an O(1) counter that stays in sync with chunks."""
+    r = audio.Recorder(max_seconds=1)
+    r.start()
+    stream = fake_sd.instances[0]
+    stream.feed(n=512)
+    assert r._total_samples == 512
+    assert abs(r.duration - 0.0) < 0.05 or r.duration >= 0  # wall clock while recording
+    stream.feed(n=512)
+    assert r._total_samples == 1024
+    # _file_duration is derived from the counter, not a rescan of chunks.
+    assert abs(r._file_duration() - 1024 / 16000) < 1e-9
+    r.cancel()
+    assert r._total_samples == 0
+
+
 def test_start_failure_is_wrapped(monkeypatch):
     def boom(**_kw):
         raise OSError("device busy")

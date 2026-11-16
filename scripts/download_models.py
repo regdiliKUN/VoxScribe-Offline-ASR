@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import shutil
 import sys
 import tarfile
@@ -76,25 +77,54 @@ VAD_URL = f"{RELEASE}/silero_vad.onnx"
 VAD_DEST = "vad/silero_vad.onnx"
 
 
+def resume_request(part_size: int) -> tuple[dict[str, str], str]:
+    """Return (headers, file_mode) for a resumable download.
+
+    HTTP Range uses ``bytes=<start>-`` (RFC 9110).  A malformed header is
+    silently ignored by servers, which then send the whole file; appending
+    that to an existing .part corrupts the model.  With nothing to resume,
+    download from scratch in ``wb`` mode.
+    """
+    if part_size > 0:
+        return {"Range": f"bytes={part_size}-"}, "ab"
+    return {}, "wb"
+
+
+def resume_is_aligned(response, part_size: int) -> bool:
+    """A 206 response must actually start where our .part file ends.
+
+    Some proxies reply 206 with ``Content-Range: bytes 0-...``; appending
+    that body duplicates the whole file and silently corrupts the model.
+    """
+    if part_size <= 0:
+        return True
+    header = response.headers.get("Content-Range", "")
+    match = re.match(r"bytes\s+(\d+)-", header)
+    return match is None or int(match.group(1)) == part_size
+
+
 def download(url: str, dest: Path, *, retries: int = 3) -> Path:
     import requests
     if dest.is_file() and dest.stat().st_size > 1024:
         print(f"  cached: {dest.name} ({dest.stat().st_size / 1048576:.0f} MB)")
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".part")
     last = None
     for attempt in range(1, retries + 1):
         try:
-            with requests.get(url, stream=True, timeout=(20, 120)) as r:
+            part_size = tmp.stat().st_size if tmp.is_file() else 0
+            headers, mode = resume_request(part_size)
+            with requests.get(url, stream=True, headers=headers,
+                              timeout=(20, 120)) as r:
                 r.raise_for_status()
-                tmp = dest.with_suffix(dest.suffix + ".part")
-                mode = "ab" if tmp.exists() else "wb"
-                headers = {"Range": f"bytes-{tmp.stat().st_size}="} if mode == "ab" else {}
-                if headers:
-                    r.close()
-                    r2 = requests.get(url, stream=True, headers=headers, timeout=(20, 120))
-                    r = r2
-                done = tmp.stat().st_size if mode == "ab" else 0
+                # Only append when the server honoured the Range request.
+                # A 200 (full body) means we must overwrite the .part file.
+                if mode == "ab" and (
+                        r.status_code != 206 or not resume_is_aligned(r, part_size)):
+                    mode = "wb"
+                    part_size = 0
+                done = part_size
                 total = int(r.headers.get("Content-Length", 0)) + done
                 with open(tmp, mode) as f:
                     for chunk in r.iter_content(1024 * 1024):
@@ -105,8 +135,8 @@ def download(url: str, dest: Path, *, retries: int = 3) -> Path:
                                 print(f"\r  {dest.name}: {done / 1048576:.0f}/{total / 1048576:.0f} MB",
                                       end="", flush=True)
                 print()
-                tmp.replace(dest)
-                return dest
+            tmp.replace(dest)
+            return dest
         except Exception as exc:
             last = exc
             print(f"  attempt {attempt} failed: {exc}")
@@ -119,13 +149,30 @@ def extract(archive: Path, mapping: dict[str, str]) -> None:
     found = set()
     with tarfile.open(archive, "r:bz2") as tf:
         for member in tf:
-            if member.name in wanted:
-                dst = MODELS / mapping[member.name]
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                with tf.extractfile(member) as src, open(dst, "wb") as out:
-                    shutil.copyfileobj(src, out, length=1024 * 1024)
-                print(f"  -> {dst.relative_to(MODELS)} ({dst.stat().st_size / 1048576:.1f} MB)")
+            if member.name not in wanted:
+                continue
+            # Only regular files can be copied.  A symlink/dir entry matching a
+            # wanted name makes extractfile() raise (or follow an arbitrary
+            # link target), aborting the whole model install.
+            if not member.isfile():
+                # Treat as handled so the final "missing members" check does
+                # not fail on a normal archive that carries metadata entries.
                 found.add(member.name)
+                continue
+            dst = (MODELS / mapping[member.name]).resolve()
+            # Defence in depth: never write outside the models directory even
+            # if a mapping entry is later edited to an absolute/traversal path.
+            if MODELS.resolve() not in dst.parents:
+                raise RuntimeError(f"unsafe extraction target: {dst}")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            src = tf.extractfile(member)
+            if src is None:
+                continue
+            with src, open(dst, "wb") as out:
+                shutil.copyfileobj(src, out, length=1024 * 1024)
+            print(f"  -> {dst.relative_to(MODELS.resolve())} "
+                  f"({dst.stat().st_size / 1048576:.1f} MB)")
+            found.add(member.name)
     missing = wanted - found
     if missing:
         raise RuntimeError(f"archive {archive.name} missing members: {sorted(missing)}")
@@ -144,6 +191,9 @@ def main() -> int:
     ap.add_argument("--only", nargs="*", choices=list(SOURCES), help="下载指定引擎")
     ap.add_argument("--verify", action="store_true", help="只做完整性校验")
     args = ap.parse_args()
+    if sum(map(bool, (args.all, args.light, args.only is not None, args.verify))) > 1:
+        print("ERROR: --all / --light / --only / --verify are mutually exclusive")
+        return 2
 
     if args.verify:
         from voxscribe.core.integrity import verify_full
